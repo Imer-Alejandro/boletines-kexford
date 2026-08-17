@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: server-boletin-kexford
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx prisma generate
+    startCommand: node src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CRON_ENABLED
+        value: "true"
+      - key: CRON_SCHEDULE
+        value: "*/5 * * * *"

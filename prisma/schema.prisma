@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Customer {
+  id                BigInt    @id @default(autoincrement())
+  external_id       String?   @db.VarChar(100)
+  name              String    @db.VarChar(255)
+  email             String    @db.VarChar(320) @unique
+  active            Boolean   @default(true)
+  unsubscribe_token String?   @unique @db.VarChar(64)
+  unsubscribed_at   DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  campaignRecipients CampaignRecipient[]
+}
+
+model Campaign {
+  id                  BigInt              @id @default(autoincrement())
+  name                String              @db.VarChar(255)
+  title               String              @db.VarChar(255)
+  content             String              @default("")
+  subject             String              @db.VarChar(500)
+  image_url           String?             @db.Text
+  image_public_id     String?             @db.Text
+  start_date          DateTime            @db.Date
+  end_date            DateTime            @db.Date
+  start_time          DateTime            @db.Time
+  end_time            DateTime            @db.Time
+  daily_limit         Int                 @default(50)
+  hourly_limit        Int                 @default(7)
+  min_interval_seconds Int                @default(30)
+  max_interval_seconds Int                @default(90)
+  status              String              @default("DRAFT")
+  total_recipients    Int                 @default(0)
+  total_sent          Int                 @default(0)
+  total_failed        Int                 @default(0)
+  total_pending       Int                 @default(0)
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @updatedAt
+
+  recipients CampaignRecipient[]
+}
+
+model CampaignRecipient {
+  id             BigInt   @id @default(autoincrement())
+  campaign_id    BigInt
+  customer_id    BigInt
+  email          String   @db.VarChar(320)
+  scheduled_at   DateTime
+  status         String   @default("PENDING")
+  attempts       Int      @default(0)
+  processing_at  DateTime?
+  sent_at        DateTime?
+  error_message  String?
+  last_attempt_at DateTime?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  campaign Campaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customer_id], references: [id])
+
+  @@unique([campaign_id, customer_id])
+  @@index([status, scheduled_at], name: "idx_campaign_recipients_schedule")
+  @@index([campaign_id], name: "idx_campaign_recipients_campaign")
+  @@index([customer_id], name: "idx_campaign_recipients_customer")
+}
