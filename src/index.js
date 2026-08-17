@@ -6,6 +6,7 @@ const cron = require('node-cron');
 const campaignRoutes = require('./routes/campaigns');
 const customerRoutes = require('./routes/customers');
 const unsubscribeRoutes = require('./routes/unsubscribe');
+const { requireAuth } = require('./middleware/auth');
 const { serializeBigInt } = require('./lib/jsonUtils');
 
 const app = express();
@@ -61,7 +62,7 @@ app.get('/health', async (req, res) => {
   }
 });
 
-app.get('/status', (req, res) => {
+app.get('/status', requireAuth, (req, res) => {
   const uptimeHours = Math.round(getUptimeHours() * 100) / 100;
   const remainingHours = Math.round((MONTHLY_HOUR_LIMIT - HOUR_BUFFER - uptimeHours) * 100) / 100;
   res.json({
@@ -75,8 +76,8 @@ app.get('/status', (req, res) => {
   });
 });
 
-app.use('/campaigns', campaignRoutes);
-app.use('/customers', customerRoutes);
+app.use('/campaigns', requireAuth, campaignRoutes);
+app.use('/customers', requireAuth, customerRoutes);
 app.use('/unsubscribe', unsubscribeRoutes);
 
 app.use((req, res) => {

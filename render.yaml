@@ -25,6 +25,10 @@ services:
         sync: false
       - key: CORS_ORIGIN
         sync: false
+      - key: API_KEY
+        sync: false
+      - key: API_EMAIL
+        sync: false
       - key: CRON_ENABLED
         value: "true"
       - key: CRON_SCHEDULE
