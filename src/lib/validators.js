@@ -22,6 +22,7 @@ const campaignSchema = z.object({
   min_interval_seconds: z.number().int().positive().default(30),
   max_interval_seconds: z.number().int().positive().default(90),
   max_attempts: z.number().int().positive().default(3),
+  test_emails: z.array(z.string().trim().email()).optional(),
 });
 
 module.exports = { emailSchema, campaignSchema, CLOUDINARY_PATTERN };

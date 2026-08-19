@@ -117,7 +117,44 @@ async function createCampaign(payload) {
   const validated = campaignSchema.parse(payload);
   await assertNoActiveCampaign();
 
-  const { customers, totalFound } = await fetchActiveCustomers();
+  let customers;
+  let totalFound;
+  let isTestMode = false;
+
+  if (validated.test_emails && validated.test_emails.length > 0) {
+    isTestMode = true;
+    const normalizedEmails = validated.test_emails.map((e) => e.trim().toLowerCase());
+    const found = await prisma.customer.findMany({
+      where: {
+        email: { in: normalizedEmails },
+        active: true,
+      },
+      select: { id: true, external_id: true, name: true, email: true },
+    });
+    const seen = new Set();
+    customers = [];
+    for (const c of found) {
+      const email = c.email.trim().toLowerCase();
+      if (seen.has(email)) continue;
+      seen.add(email);
+      customers.push({ id: c.id, external_id: c.external_id, name: c.name, email });
+    }
+    totalFound = customers.length;
+    if (customers.length === 0) {
+      throw new Error('Ninguno de los correos de prueba fue encontrado como cliente activo');
+    }
+    const notFound = normalizedEmails.filter((e) => !seen.has(e));
+    if (notFound.length > 0) {
+      throw new Error(
+        `Estos correos no están registrados como clientes activos: ${notFound.join(', ')}`
+      );
+    }
+  } else {
+    const result = await fetchActiveCustomers();
+    customers = result.customers;
+    totalFound = result.totalFound;
+  }
+
   if (customers.length === 0) {
     throw new Error('No se encontraron clientes activos válidos para la campaña');
   }
@@ -126,7 +163,7 @@ async function createCampaign(payload) {
 
   const campaign = await prisma.campaign.create({
     data: {
-      name: validated.name,
+      name: validated.name + (isTestMode ? ' [PRUEBA]' : ''),
       title: validated.title,
       content: validated.content || '',
       subject: validated.subject,
@@ -163,6 +200,7 @@ async function createCampaign(payload) {
     },
     totalFound,
     validRecipients: customers.length,
+    testMode: isTestMode,
   };
 }
 
