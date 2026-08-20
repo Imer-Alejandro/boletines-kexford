@@ -20,6 +20,11 @@ function createTransport() {
       user,
       pass,
     },
+    tls: {
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 15000,
+    family: 4,
   });
 }
 
