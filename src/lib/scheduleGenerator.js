@@ -78,28 +78,16 @@ function generateTimesInWindow(date, window, count, minInterval, maxInterval) {
 
 function distributeAcrossWindows(count, windows, hourlyLimit) {
   const assignments = new Array(windows.length).fill(0);
-  let remaining = count;
-  let remainingWindows = windows.length;
+  const totalWindows = windows.length;
+  const base = Math.floor(count / totalWindows);
+  const remainder = count % totalWindows;
 
-  for (let i = 0; i < windows.length; i += 1) {
-    const maxAllowed = Math.min(hourlyLimit, remaining - (remainingWindows - 1) * 0);
-    const allocate = Math.min(Math.ceil(remaining / remainingWindows), maxAllowed);
-    assignments[i] = allocate;
-    remaining -= allocate;
-    remainingWindows -= 1;
+  for (let i = 0; i < totalWindows; i += 1) {
+    assignments[i] = Math.min(base + (i < remainder ? 1 : 0), hourlyLimit);
   }
 
-  if (remaining > 0) {
-    for (let i = 0; i < windows.length && remaining > 0; i += 1) {
-      if (assignments[i] < hourlyLimit) {
-        const available = Math.min(hourlyLimit - assignments[i], remaining);
-        assignments[i] += available;
-        remaining -= available;
-      }
-    }
-  }
-
-  if (remaining > 0) {
+  const assigned = assignments.reduce((sum, n) => sum + n, 0);
+  if (assigned < count) {
     throw new Error('Not enough capacity to schedule recipients with the configured hourly limit');
   }
 
