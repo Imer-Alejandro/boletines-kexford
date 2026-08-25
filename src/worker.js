@@ -146,6 +146,14 @@ async function processRecipient(recipient) {
 }
 
 async function processPendingRecipients() {
+  const activeCampaigns = await prisma.campaign.count({
+    where: { status: 'RUNNING' },
+  });
+
+  if (activeCampaigns === 0) {
+    return { processed: 0 };
+  }
+
   await recoverStuckRecipients();
   const limit = Math.min(BATCH_SIZE, RECOVERY_LIMIT_PER_RUN);
   const recipients = await fetchPendingRecipients(limit);
