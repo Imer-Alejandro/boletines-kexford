@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const cron = require('node-cron');
 const campaignRoutes = require('./routes/campaigns');
 const customerRoutes = require('./routes/customers');
 const unsubscribeRoutes = require('./routes/unsubscribe');
@@ -71,8 +70,7 @@ app.get('/status', requireAuth, (req, res) => {
     monthly_limit: MONTHLY_HOUR_LIMIT,
     buffer: HOUR_BUFFER,
     remaining_hours: remainingHours,
-    cron_active: CRON_ENABLED && !isOverHourLimit(),
-    cron_schedule: CRON_SCHEDULE,
+    worker: 'render-cron-job',
   });
 });
 
@@ -83,35 +81,6 @@ app.use('/unsubscribe', unsubscribeRoutes);
 app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
-
-const CRON_ENABLED = process.env.CRON_ENABLED !== 'false';
-const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/5 * * * *';
-
-if (CRON_ENABLED) {
-  const { processPendingRecipients } = require('./worker');
-  let isProcessing = false;
-
-  cron.schedule(CRON_SCHEDULE, async () => {
-    if (isProcessing) return;
-    if (isOverHourLimit()) {
-      console.log('[cron] Límite de horas alcanzado. Worker pausado.');
-      return;
-    }
-    isProcessing = true;
-    try {
-      const result = await processPendingRecipients();
-      if (result.processed > 0) {
-        console.log(`[cron] Processed ${result.processed} recipients`);
-      }
-    } catch (error) {
-      console.error('[cron] Worker error:', error.message);
-    } finally {
-      isProcessing = false;
-    }
-  });
-
-  console.log(`[cron] Worker activo: ${CRON_SCHEDULE}`);
-}
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
