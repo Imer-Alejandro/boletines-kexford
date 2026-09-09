@@ -2,9 +2,16 @@ const prisma = require('./prismaClient');
 const { emailSchema, campaignSchema } = require('./validators');
 const { generateScheduledAtTimes } = require('./scheduleGenerator');
 const { chunkArray } = require('./batchUtils');
+const { sendMail } = require('./emailSender');
+const { createEmailHtml } = require('./emailTemplate');
+const { buildUnsubscribeUrl, ensureUnsubscribeToken } = require('./unsubscribeService');
 
 const RECIPIENT_BATCH_SIZE = Number(process.env.RECIPIENT_BATCH_SIZE || 500);
 const ACTIVE_CAMPAIGN_STATUSES = ['RUNNING', 'PAUSED'];
+const FORCE_SEND_LIMIT = 10;
+const FORCE_SEND_WINDOW_MS = 60 * 60 * 1000;
+
+const forceSendTracker = new Map();
 
 async function fetchActiveCustomers() {
   const customersData = await prisma.customer.findMany({
@@ -394,6 +401,157 @@ async function retryFailedRecipients(id, options = {}) {
   };
 }
 
+function getForceSendCount(campaignId) {
+  const now = Date.now();
+  const entries = forceSendTracker.get(String(campaignId)) || [];
+  const recent = entries.filter((t) => now - t < FORCE_SEND_WINDOW_MS);
+  forceSendTracker.set(String(campaignId), recent);
+  return recent.length;
+}
+
+function recordForceSend(campaignId) {
+  const key = String(campaignId);
+  const entries = forceSendTracker.get(key) || [];
+  entries.push(Date.now());
+  forceSendTracker.set(key, entries);
+}
+
+async function forceSendRecipients(id) {
+  const campaign = await getCampaignById(id);
+  if (!['RUNNING', 'PAUSED'].includes(campaign.status)) {
+    throw new Error('Solo se pueden forzar envíos en campañas RUNNING o PAUSED');
+  }
+
+  const used = getForceSendCount(id);
+  const remaining = FORCE_SEND_LIMIT - used;
+  if (remaining <= 0) {
+    throw new Error(
+      `Límite de ${FORCE_SEND_LIMIT} envíos forzados por hora alcanzado. Intentá más tarde.`
+    );
+  }
+
+  const now = new Date();
+  const recipients = await prisma.campaignRecipient.findMany({
+    where: {
+      campaign_id: BigInt(id),
+      status: 'PENDING',
+      scheduled_at: { gt: now },
+      customer: {
+        active: true,
+        unsubscribed_at: null,
+      },
+    },
+    include: {
+      campaign: true,
+      customer: true,
+    },
+    orderBy: { scheduled_at: 'asc' },
+    take: remaining,
+  });
+
+  if (recipients.length === 0) {
+    return {
+      sent: 0,
+      failed: 0,
+      remaining,
+      message: 'No hay destinatarios pendientes para forzar envío',
+    };
+  }
+
+  let sent = 0;
+  let failed = 0;
+
+  for (const recipient of recipients) {
+    const locked = await prisma.campaignRecipient.updateMany({
+      where: {
+        id: recipient.id,
+        status: 'PENDING',
+      },
+      data: {
+        status: 'PROCESSING',
+        processing_at: now,
+        last_attempt_at: now,
+      },
+    });
+
+    if (locked.count === 0) continue;
+
+    try {
+      const token = await ensureUnsubscribeToken(recipient.customer_id);
+      const unsubscribeUrl = buildUnsubscribeUrl(token);
+      const privacyPolicyUrl = process.env.PRIVACY_POLICY_URL || null;
+      const title =
+        campaign.title || 'Programa de Boletines Informativo Kexford para la Salud Financiera';
+      const content = campaign.content || '';
+
+      const html = createEmailHtml({
+        title,
+        content,
+        imageUrl: campaign.image_url,
+        unsubscribeUrl,
+        privacyPolicyUrl,
+      });
+
+      const text = [
+        title,
+        '',
+        content || null,
+        '',
+        `Darse de baja: ${unsubscribeUrl}`,
+        privacyPolicyUrl ? `Política de privacidad: ${privacyPolicyUrl}` : null,
+        '',
+        `(c) ${new Date().getFullYear()} Sanchez Business & Corp. Todos los derechos reservados.`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      await sendMail({
+        to: recipient.email,
+        subject: campaign.subject,
+        html,
+        text,
+      });
+
+      await prisma.campaignRecipient.update({
+        where: { id: recipient.id },
+        data: {
+          status: 'SENT',
+          sent_at: new Date(),
+          processing_at: null,
+          error_message: null,
+        },
+      });
+
+      recordForceSend(id);
+      sent++;
+    } catch (error) {
+      await prisma.campaignRecipient.update({
+        where: { id: recipient.id },
+        data: {
+          status: 'FAILED',
+          processing_at: null,
+          last_attempt_at: new Date(),
+          error_message: `[Force-send] ${error.message}`,
+          attempts: (recipient.attempts || 0) + 1,
+        },
+      });
+      failed++;
+    }
+  }
+
+  await refreshCampaignTotals(id);
+
+  return {
+    sent,
+    failed,
+    remaining: FORCE_SEND_LIMIT - getForceSendCount(id),
+    message:
+      sent > 0
+        ? `${sent} correo(s) enviado(s) forzadamente${failed > 0 ? `, ${failed} fallido(s)` : ''}`
+        : 'No se pudo enviar ningún correo',
+  };
+}
+
 module.exports = {
   createCampaign,
   listCampaigns,
@@ -404,6 +562,7 @@ module.exports = {
   cancelCampaign,
   resumeCampaign,
   retryFailedRecipients,
+  forceSendRecipients,
   refreshCampaignTotals,
   assertNoActiveCampaign,
 };

@@ -10,6 +10,7 @@ const {
   cancelCampaign,
   resumeCampaign,
   retryFailedRecipients,
+  forceSendRecipients,
 } = require('../lib/campaignService');
 
 router.get('/', async (req, res) => {
@@ -81,6 +82,15 @@ router.post('/:id/resume', async (req, res) => {
   try {
     const campaign = await resumeCampaign(Number(req.params.id));
     res.json({ ok: true, campaign, message: 'Campaña reanudada correctamente' });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+router.post('/:id/force-send', async (req, res) => {
+  try {
+    const result = await forceSendRecipients(Number(req.params.id));
+    res.json({ ok: true, ...result });
   } catch (error) {
     res.status(400).json({ ok: false, error: error.message });
   }
